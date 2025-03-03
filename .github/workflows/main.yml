@@ -1,0 +1,77 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  IMAGE_TAG: latest
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Restore `node_modules` Cache
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            node-modules-${{ runner.os }}-
+
+      - name: Install Dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci --omit=dev
+
+      - name: Restore `.next/cache`
+        id: cache-next
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: next-cache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            next-cache-${{ runner.os }}-
+
+      - name: Build Next.js App
+        run: npm run build
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-build
+          path: |
+            .next
+            package.json
+            package-lock.json
+            public
+            node_modules
+
+  docker:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: next-build
+          path: app
+
+      - name: Build and Push Docker Image
+        run: |
+          IMAGE_URI="thomassjy/my-docker-playground:${{ env.IMAGE_TAG }}"
+          docker build -t $IMAGE_URI -f Dockerfile .
+          docker push $IMAGE_URI
